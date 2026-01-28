@@ -38,7 +38,7 @@ public class GroqService {
                 return "audio.ogg";
             }
         });
-        body.add("model", "distil-whisper-large-v3-en");
+        body.add("model", "whisper-large-v3");
         body.add("response_format", "json");
 
         HttpEntity<MultiValueMap<String, Object>> requestEntity = new HttpEntity<>(body, headers);
