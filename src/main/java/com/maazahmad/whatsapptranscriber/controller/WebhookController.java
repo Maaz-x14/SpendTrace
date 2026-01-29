@@ -20,8 +20,9 @@ public class WebhookController {
 
     private final WhatsAppService whatsAppService;
     private final GroqService groqService;
-    private final ObjectMapper objectMapper; // Injected by Spring
-    // Add this at the top of the class
+    private final ObjectMapper objectMapper;
+
+    // Idempotency cache to prevent duplicate processing
     private final Set<String> processedMessageIds = ConcurrentHashMap.newKeySet();
 
     @Value("${whatsapp.verifyToken}")
@@ -42,40 +43,39 @@ public class WebhookController {
 
     @PostMapping
     public ResponseEntity<String> handleWebhook(@RequestBody String rawPayload) {
-        // 1. Log the payload so we know it arrived
+        // Log payload for debugging
         System.out.println("========== NEW WEBHOOK RECEIVED ==========");
-        System.out.println(rawPayload);
+        // System.out.println(rawPayload); // Comment out to reduce noise if needed
 
         try {
-            // 2. Parse the JSON string into our DTO
             WhatsAppWebhookDto dto = objectMapper.readValue(rawPayload, WhatsAppWebhookDto.class);
 
-            // 3. Dig through the nested JSON to find the message
             if (dto.getEntry() != null && !dto.getEntry().isEmpty()) {
                 WhatsAppWebhookDto.Entry entry = dto.getEntry().get(0);
                 if (entry.getChanges() != null && !entry.getChanges().isEmpty()) {
                     WhatsAppWebhookDto.Change change = entry.getChanges().get(0);
-                    if (change.getValue() != null && change.getValue().getMessages() != null && !change.getValue().getMessages().isEmpty()) {
 
+                    if (change.getValue() != null && change.getValue().getMessages() != null && !change.getValue().getMessages().isEmpty()) {
                         WhatsAppWebhookDto.Message message = change.getValue().getMessages().get(0);
                         String from = message.getFrom();
 
-                        // 4. Check if it is an AUDIO message
+                        // Check for AUDIO
                         if ("audio".equals(message.getType()) && message.getAudio() != null) {
                             String mediaId = message.getAudio().getId();
+
+                            // Idempotency Check
                             if (processedMessageIds.contains(mediaId)) {
                                 System.out.println("Duplicate message ignored: " + mediaId);
                                 return ResponseEntity.ok().build();
                             }
-
                             processedMessageIds.add(mediaId);
+
                             System.out.println("Audio detected! Processing ID: " + mediaId);
 
-                            // 5. Fire and forget (Async transcription)
+                            // Trigger Async Processing
                             processAudioAsync(mediaId, from);
-                        } else {
-                            System.out.println("Ignored message type: " + message.getType());
                         }
+                        // Optional: Handle text commands here later
                     }
                 }
             }
@@ -84,29 +84,35 @@ public class WebhookController {
             e.printStackTrace();
         }
 
-        // Always return 200 OK to Meta, otherwise they will stop sending messages
         return ResponseEntity.ok("EVENT_RECEIVED");
     }
 
     @Async
     public void processAudioAsync(String mediaId, String from) {
         try {
+            // Step 1: Download Audio
             System.out.println("Fetching URL for Media ID: " + mediaId);
             String mediaUrl = whatsAppService.getMediaUrl(mediaId);
-
-            System.out.println("Downloading audio from: " + mediaUrl);
             byte[] audioData = whatsAppService.downloadFile(mediaUrl);
 
-            System.out.println("Transcribing with Groq...");
+            // Step 2: Transcribe (Whisper)
+            System.out.println("Transcribing with Groq Whisper...");
             String transcribedText = groqService.transcribe(audioData);
-
             System.out.println("Transcription: " + transcribedText);
-            whatsAppService.sendReply(from, "Transcription: " + transcribedText);
+
+            // Step 3: Extract Data (Llama 3)
+            System.out.println("Extracting JSON with Groq Llama-3...");
+            String expenseJson = groqService.extractExpenseData(transcribedText);
+            System.out.println("Extracted Data: " + expenseJson);
+
+            // Step 4: Reply with the Result
+            String replyMessage = "✅ Expense Logged!\n\n" + expenseJson;
+            whatsAppService.sendReply(from, replyMessage);
 
         } catch (Exception e) {
             System.err.println("Async processing failed: " + e.getMessage());
             e.printStackTrace();
-            whatsAppService.sendReply(from, "Sorry, I crashed while thinking. Check the server logs.");
+            whatsAppService.sendReply(from, "❌ Failed to process expense: " + e.getMessage());
         }
     }
 }
