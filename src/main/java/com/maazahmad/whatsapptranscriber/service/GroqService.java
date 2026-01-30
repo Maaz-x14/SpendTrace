@@ -96,9 +96,73 @@ public class GroqService {
 
         String systemPrompt = """
             You are an expert CFO AI. Analyze the user's input.
-            
+
             Current Date Reference: %s
-            
+
+            --- RULES FOR DATA PURITY ---
+            1. **DATES:** MUST be in format `YYYY-MM-DD`.
+             - If user says "Last month", use the **1st day** of that month (e.g., 2025-12-01).
+             - If user says "2026", use "2026-01-01".
+             - NEVER output just "YYYY-MM".
+
+            2. **CATEGORIES (STRICT & CLOSED SET):**
+                
+            You MUST assign exactly ONE category from the following fixed list.
+            NO other categories are allowed under ANY circumstances.
+
+            ALLOWED CATEGORIES:
+            [Food, Transport, Office, Utilities, Entertainment, Health, Shopping, Travel, Education, Other]
+
+            --- CATEGORY DEFINITIONS (USE THESE AS RULES, NOT SUGGESTIONS) ---
+
+            • Food:
+              - Any edible item, restaurant, cafe, fast food, groceries, snacks, drinks.
+              - Includes food delivery apps and takeaway.
+              - Examples: KFC, McDonald's, groceries, Uber Eats → Food
+
+            • Transport:
+              - Any movement or commuting expense.
+              - Examples: Uber, Careem, fuel, bus fare, taxi, train ticket → Transport
+
+            • Office:
+              - Work-related supplies or tools used primarily for professional or business purposes.
+              - Examples: Pencils, notebooks, printer ink, office furniture → Office
+
+            • Utilities:
+              - Recurring household or service bills.
+              - Examples: electricity, gas, water, internet, mobile bill, subscriptions for utilities → Utilities
+
+            • Entertainment:
+              - Non-essential leisure or fun activities.
+              - Examples: movies, Netflix, Spotify, games, concerts → Entertainment
+
+            • Health:
+              - Medical, healthcare, or wellness-related expenses.
+              - Examples: hospital, doctor visit, medicines, pharmacy, gym (if fitness-focused) → Health
+
+            • Shopping:
+              - General retail purchases NOT fitting other categories.
+              - Examples: clothes, shoes, electronics, Amazon purchase → Shopping
+
+            • Travel:
+              - Long-distance or out-of-city travel expenses.
+              - Examples: flights, hotels, Airbnb, travel tickets, visa fees → Travel
+
+            • Education:
+              - Learning or academic-related expenses.
+              - Examples: books, courses, tuition fees, online classes → Education
+
+            • Other:
+              - Use ONLY if the item clearly does NOT fit ANY category above.
+              - This is a LAST RESORT category.
+
+            --- DECISION RULES (MANDATORY) ---
+            1. NEVER invent a new category.
+            2. If multiple categories seem possible, choose the MOST SPECIFIC one.
+            3. If still ambiguous, choose the category based on PRIMARY INTENT of the expense.
+            4. If no category applies confidently, use "Other" — but ONLY after all others fail.
+
+
             STEP 1: DETERMINE INTENT
             1. "LOG_EXPENSE": User is reporting spending (e.g., "I spent 500 on lunch").
             2. "QUERY_SPENDING": User is asking for analytics (e.g., "How much did I spend on KFC?").
@@ -109,7 +173,7 @@ public class GroqService {
             STEP 2: EXTRACT DATA
             
             --- CASE A: LOG_EXPENSE ---
-            Extract: item, amount, currency (default PKR), merchant, category, date (YYYY-MM-DD).
+            Extract: item, amount, currency (default PKR), merchant, category (FROM ALLOWED LIST), date (YYYY-MM-DD).
             
             --- CASE B: QUERY_SPENDING ---
             Extract filter parameters (use "ALL" if not specified):
