@@ -32,10 +32,31 @@ public class GroqService {
     // Hardcoded Chat URL for Llama-3 calls
     private static final String GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions";
 
-
-    // Step 1: Transcribe Audio (Whisper)
+    /**
+     * Step 1: Transcribe Audio (Whisper) with Retry Logic
+     * Wraps the actual call in a loop to handle network blips.
+     */
     @SneakyThrows
     public String transcribe(byte[] audioData) {
+        int maxRetries = 3;
+        for (int i = 0; i < maxRetries; i++) {
+            try {
+                return attemptTranscribe(audioData);
+            } catch (Exception e) {
+                System.err.println("Transcription attempt " + (i + 1) + " failed: " + e.getMessage());
+                if (i == maxRetries - 1) {
+                    throw e; // Crash if all retries fail
+                }
+                Thread.sleep(1000); // Wait 1 second before retrying
+            }
+        }
+        return null; // Should not be reached
+    }
+
+    /**
+     * Helper method to perform the actual HTTP request
+     */
+    private String attemptTranscribe(byte[] audioData) {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.MULTIPART_FORM_DATA);
         headers.setBearerAuth(groqApiKey);
@@ -53,13 +74,18 @@ public class GroqService {
 
         HttpEntity<MultiValueMap<String, Object>> requestEntity = new HttpEntity<>(body, headers);
 
+        // Note: Using 'groqAudioUrl' from properties (should be .../audio/transcriptions)
         ResponseEntity<String> response = restTemplate.exchange(groqAudioUrl, HttpMethod.POST, requestEntity, String.class);
 
         if (response.getStatusCode().is2xxSuccessful()) {
-            JsonNode jsonNode = objectMapper.readTree(response.getBody());
-            return jsonNode.get("text").asText();
+            try {
+                JsonNode jsonNode = objectMapper.readTree(response.getBody());
+                return jsonNode.get("text").asText();
+            } catch (Exception e) {
+                throw new RuntimeException("Invalid JSON from Groq");
+            }
         } else {
-            throw new RuntimeException("Failed to transcribe audio: " + response.getStatusCode());
+            throw new RuntimeException("Groq API Error: " + response.getStatusCode());
         }
     }
 
