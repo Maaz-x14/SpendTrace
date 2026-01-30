@@ -123,7 +123,8 @@ public class WebhookController {
                     String item = data.path("item").asText();
                     String amount = data.path("amount").asText();
                     String currency = data.path("currency").asText();
-                    replyMessage = String.format("✅ *Expense Saved!*\n🛒 %s\n💰 %s %s", item, amount, currency);
+                    String merchant = data.path("merchant").asText();
+                    replyMessage = String.format("✅ *Expense Saved!*\n🛒 %s\n💰 %s %s \n\uD83D\uDCCC %s", item, amount, currency, merchant);
                 }
                 case "QUERY_SPENDING" -> {
                     // --- CASE B: ANALYTICS ---
