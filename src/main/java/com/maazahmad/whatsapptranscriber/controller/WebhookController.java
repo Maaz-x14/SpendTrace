@@ -103,50 +103,69 @@ public class WebhookController {
             String transcribedText = groqService.transcribe(audioData);
             System.out.println("User said: " + transcribedText);
 
-            // Step 3: Analyze Intent
+            // Step 3: Analyze Intent (Llama 3 - CFO Mode)
             System.out.println("Analyzing Intent...");
             String analysisJson = groqService.analyzeInput(transcribedText);
 
             JsonNode root = objectMapper.readTree(analysisJson);
             String intent = root.path("intent").asText();
+
             String replyMessage = "";
 
-            if ("LOG_EXPENSE".equals(intent)) {
-                // ... (Logic remains the same) ...
-                JsonNode expenseDataNode = root.path("data");
-                String expenseJson = expenseDataNode.toString();
-                googleSheetsService.logExpense(expenseJson);
+            // Step 4: Route based on Intent
+            switch (intent) {
+                case "LOG_EXPENSE" -> {
+                    // --- CASE A: SAVE EXPENSE ---
+                    JsonNode data = root.path("data");
+                    // We pass the inner data object, but logExpense expects the structure Llama returns inside 'data'
+                    googleSheetsService.logExpense(data.toString());
 
-                String item = expenseDataNode.path("item").asText();
-                String amount = expenseDataNode.path("amount").asText();
-                String currency = expenseDataNode.path("currency").asText();
-                replyMessage = String.format("✅ *Expense Saved!*\n🛒 %s\n💰 %s %s", item, amount, currency);
+                    String item = data.path("item").asText();
+                    String amount = data.path("amount").asText();
+                    String currency = data.path("currency").asText();
+                    replyMessage = String.format("✅ *Expense Saved!*\n🛒 %s\n💰 %s %s", item, amount, currency);
+                }
+                case "QUERY_SPENDING" -> {
+                    // --- CASE B: ANALYTICS ---
+                    JsonNode query = root.path("query");
+                    String category = query.path("category").asText("ALL");
+                    String merchant = query.path("merchant").asText("ALL");
+                    String item = query.path("item").asText("ALL");
+                    String start = query.path("start_date").asText();
+                    String end = query.path("end_date").asText();
 
-            } else if ("QUERY_SPENDING".equals(intent)) {
-                // --- CASE B: ANSWER QUESTION (UPDATED) ---
-                JsonNode query = root.path("query");
+                    System.out.println("Querying: Cat=" + category + ", Merch=" + merchant + ", Item=" + item);
+                    String report = googleSheetsService.calculateAnalytics(category, merchant, item, start, end);
+                    replyMessage = "🔍 *CFO Report*\n" + report;
+                }
+                case "EDIT_EXPENSE" -> {
+                    // --- CASE C: EDIT (Context-Aware) ---
+                    JsonNode edit = root.path("edit");
+                    String targetItem = edit.path("target_item").asText();
+                    String targetDate = edit.path("target_date").asText();
+                    double newAmount = edit.path("new_amount").asDouble();
+                    String newCurrency = edit.path("new_currency").asText("PKR");
 
-                String category = query.path("category").asText("ALL");
-                String merchant = query.path("merchant").asText("ALL"); // New Field
-                String item = query.path("item").asText("ALL");         // New Field
-                String start = query.path("start_date").asText();
-                String end = query.path("end_date").asText();
-
-                System.out.println("Querying: Cat=" + category + ", Merch=" + merchant + ", Item=" + item);
-
-                // Call updated calculator
-                String analyticsReport = googleSheetsService.calculateAnalytics(category, merchant, item, start, end);
-                replyMessage = "🔍 *CFO Report*\n" + analyticsReport;
-
-            } else if ("IRRELEVANT".equals(intent)) {
-                // --- CASE C: IGNORE SONGS/NOISE ---
-                System.out.println("Intent: IRRELEVANT");
-                replyMessage = "I only answer to expense related queries only.";
-
-            } else {
-                replyMessage = "🤔 I wasn't sure what you meant.";
+                    System.out.println("Editing: " + targetItem + " on " + targetDate);
+                    replyMessage = googleSheetsService.editExpense(targetItem, targetDate, newAmount, newCurrency);
+                }
+                case "UNDO_LAST" -> {
+                    // --- CASE D: UNDO ---
+                    System.out.println("Undoing last entry...");
+                    replyMessage = googleSheetsService.undoLastLog();
+                }
+                case "IRRELEVANT" -> {
+                    // --- CASE E: IGNORE ---
+                    System.out.println("Intent: IRRELEVANT");
+                    replyMessage = "I only answer expense-related queries.";
+                }
+                default -> {
+                    System.out.println("Unknown Intent: " + intent);
+                    replyMessage = "🤔 I wasn't sure what you meant. I can log expenses, answer questions, or fix mistakes.";
+                }
             }
 
+            // Step 5: Reply
             whatsAppService.sendReply(from, replyMessage);
 
         } catch (Exception e) {

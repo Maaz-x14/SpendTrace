@@ -8,6 +8,7 @@ import com.google.api.client.googleapis.javanet.GoogleNetHttpTransport;
 import com.google.api.client.json.gson.GsonFactory;
 import com.google.api.services.sheets.v4.Sheets;
 import com.google.api.services.sheets.v4.SheetsScopes;
+import com.google.api.services.sheets.v4.model.ClearValuesRequest;
 import com.google.api.services.sheets.v4.model.ValueRange;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
@@ -88,6 +89,82 @@ public class GoogleSheetsService {
                 .get(spreadsheetId, "Sheet1!A:F") // Fetches columns A to F
                 .execute();
         return response.getValues();
+    }
+
+    /**
+     * SEARCH BACKWARDS LOGIC (Context-Aware Edit)
+     * Iterates from the bottom up to find the most recent transaction matching the criteria.
+     */
+    @SneakyThrows
+    public String editExpense(String targetItem, String targetDateStr, double newAmount, String newCurrency) {
+        List<List<Object>> rows = readAllRows();
+        if (rows == null || rows.isEmpty()) return "⚠️ Ledger is empty.";
+
+        String searchItem = targetItem.toLowerCase();
+
+        // Check if we are searching strictly by date or just "Most Recent"
+        boolean matchAnyDate = "LAST_MATCH".equalsIgnoreCase(targetDateStr);
+        LocalDate searchDate = matchAnyDate ? null : LocalDate.parse(targetDateStr);
+
+        // Iterate BACKWARDS (Most recent first)
+        for (int i = rows.size() - 1; i >= 0; i--) {
+            List<Object> row = rows.get(i);
+            if (row.size() < 4) continue;
+
+            try {
+                String rowDateStr = row.get(0).toString();
+                String rowItem = row.get(1).toString().toLowerCase();
+
+                // LOGIC:
+                // 1. Item matches?
+                // 2. AND (We don't care about date OR The date matches exactly)
+                boolean itemMatch = rowItem.contains(searchItem);
+                boolean dateMatch = matchAnyDate || LocalDate.parse(rowDateStr).isEqual(searchDate);
+
+                if (itemMatch && dateMatch) {
+                    // FOUND IT! Update this row.
+                    int rowIndex = i + 1;
+                    String range = "Sheet1!C" + rowIndex + ":D" + rowIndex;
+
+                    List<Object> updateData = List.of(newAmount, newCurrency);
+                    ValueRange body = new ValueRange().setValues(List.of(updateData));
+
+                    sheetsService.spreadsheets().values()
+                            .update(spreadsheetId, range, body)
+                            .setValueInputOption("USER_ENTERED")
+                            .execute();
+
+                    String oldDate = row.get(0).toString();
+                    return String.format("✅ Updated **%s** (%s) to **%.2f %s**.", targetItem, oldDate, newAmount, newCurrency);
+                }
+            } catch (Exception e) {
+                // Ignore parsing errors
+            }
+        }
+
+        return "❌ Could not find '" + targetItem + "' " + (matchAnyDate ? "recently." : "on " + targetDateStr);
+    }   
+
+    /**
+     * UNDO LAST LOGIC
+     * Deletes the very last row in the spreadsheet.
+     */
+    @SneakyThrows
+    public String undoLastLog() {
+        List<List<Object>> rows = readAllRows();
+        if (rows == null || rows.isEmpty()) return "⚠️ Nothing to undo.";
+
+        int lastRowIndex = rows.size(); // 1-based index of the last row
+
+        // Clear columns A to F for that row
+        String range = "Sheet1!A" + lastRowIndex + ":F" + lastRowIndex;
+
+        ClearValuesRequest requestBody = new ClearValuesRequest();
+        sheetsService.spreadsheets().values()
+                .clear(spreadsheetId, range, requestBody)
+                .execute();
+
+        return "✅ Last entry deleted (Row " + lastRowIndex + ").";
     }
 
     // Updated Calculator: Handles "ALL" dates and Multi-Currency Summing

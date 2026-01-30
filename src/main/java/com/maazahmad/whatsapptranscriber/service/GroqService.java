@@ -34,7 +34,6 @@ public class GroqService {
 
     /**
      * Step 1: Transcribe Audio (Whisper) with Retry Logic
-     * Wraps the actual call in a loop to handle network blips.
      */
     @SneakyThrows
     public String transcribe(byte[] audioData) {
@@ -53,16 +52,12 @@ public class GroqService {
         return null; // Should not be reached
     }
 
-    /**
-     * Helper method to perform the actual HTTP request
-     */
     private String attemptTranscribe(byte[] audioData) {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.MULTIPART_FORM_DATA);
         headers.setBearerAuth(groqApiKey);
 
         MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
-        // Wrap byte array in a Resource with a filename so Groq knows it's audio
         body.add("file", new ByteArrayResource(audioData) {
             @Override
             public String getFilename() {
@@ -74,7 +69,6 @@ public class GroqService {
 
         HttpEntity<MultiValueMap<String, Object>> requestEntity = new HttpEntity<>(body, headers);
 
-        // Note: Using 'groqAudioUrl' from properties (should be .../audio/transcriptions)
         ResponseEntity<String> response = restTemplate.exchange(groqAudioUrl, HttpMethod.POST, requestEntity, String.class);
 
         if (response.getStatusCode().is2xxSuccessful()) {
@@ -90,7 +84,7 @@ public class GroqService {
     }
 
     /**
-     * MASTER BRAIN: Analyzes Intent (Log vs Query vs Irrelevant) & Extracts Data
+     * MASTER BRAIN: Analyzes Intent (Log vs Query vs Edit vs Undo)
      */
     @SneakyThrows
     public String analyzeInput(String rawText) {
@@ -100,6 +94,7 @@ public class GroqService {
 
         String today = LocalDate.now().toString();
 
+        // UPDATED PROMPT: Now includes EDIT_EXPENSE and UNDO_LAST
         String systemPrompt = """
             You are an expert CFO AI. Analyze the user's input.
             
@@ -108,7 +103,9 @@ public class GroqService {
             STEP 1: DETERMINE INTENT
             1. "LOG_EXPENSE": User is reporting spending (e.g., "I spent 500 on lunch").
             2. "QUERY_SPENDING": User is asking for analytics (e.g., "How much did I spend on KFC?").
-            3. "IRRELEVANT": Input is NOT related to finances (e.g., songs, greetings, random noise, poetry).
+            3. "EDIT_EXPENSE": User wants to update a specific previous entry (e.g., "Update chicken wings to 550", "Change yesterday's lunch to 300").
+            4. "UNDO_LAST": User wants to delete or revert the immediately preceding action (e.g., "Undo that", "Delete the last one", "Cancel").
+            5. "IRRELEVANT": Input is NOT related to finances.
             
             STEP 2: EXTRACT DATA
             
@@ -117,14 +114,19 @@ public class GroqService {
             
             --- CASE B: QUERY_SPENDING ---
             Extract filter parameters (use "ALL" if not specified):
-            - category (string): e.g., "Food"
-            - merchant (string): e.g., "KFC", "Uber"
-            - item (string): e.g., "Chicken Wings"
-            - start_date (string): YYYY-MM-DD
-            - end_date (string): YYYY-MM-DD
+            - category, merchant, item, start_date, end_date.
             
-            --- CASE C: IRRELEVANT ---
-            No data needed.
+            --- CASE C: EDIT_EXPENSE ---
+            Extract:
+            - target_item (string): The item name.
+            - target_date (string):\s
+                 - If user specifies "today", "yesterday", "last friday" -> Calculate YYYY-MM-DD.
+                 - If user DOES NOT mention a date -> Return "LAST_MATCH".
+            - new_amount (number): The corrected cost.
+            - new_currency (string): The corrected currency (default to PKR).
+
+            --- CASE D: UNDO_LAST ---
+            No specific data needed.
             
             STEP 3: OUTPUT JSON ONLY
             
@@ -140,11 +142,17 @@ public class GroqService {
               "query": { "category": "...", "merchant": "...", "item": "...", "start_date": "...", "end_date": "..." }
             }
             
-            Format for IRRELEVANT:
+            Format for EDIT_EXPENSE:
             {
-              "intent": "IRRELEVANT",
-              "message": "I can only help you with financial records."
+              "intent": "EDIT_EXPENSE",
+              "edit": { "target_item": "...", "target_date": "...", "new_amount": 0, "new_currency": "..." }
             }
+            
+            Format for UNDO_LAST:
+            { "intent": "UNDO_LAST" }
+            
+            Format for IRRELEVANT:
+            { "intent": "IRRELEVANT", "message": "..." }
             """.formatted(today);
 
         Map<String, Object> body = Map.of(
