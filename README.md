@@ -1,10 +1,18 @@
-# 💸 SpendTrace: Voice-First AI Financial Assistant
+# Spend It 🎙️💰
+**Your AI Chief Financial Officer on WhatsApp.**
 
-**SpendTrace** is an intelligent "CFO in your pocket." It transforms WhatsApp voice notes into structured financial data in real-time. Unlike simple transcribers, SpendTrace understands **intent**—it knows the difference between *logging an expense* ("I spent $50 on food") and *asking a question* ("How much did I spend on food this month?").
+Spend It is a voice-first SaaS that automates expense tracking. Users send a voice note on WhatsApp; the bot transcribes it, analyzes the financial intent using LLMs, and logs the data into a private, auto-provisioned Google Sheet.
 
 Built with **Java Spring Boot**, powered by **Groq (Whisper + Llama 3)**, and backed by a live **Google Sheets** ledger.
 
 ## 🚀 Key Capabilities
+
+## 🚀 Features
+* **Voice-to-Ledger:** Send voice notes like "Spent 500 on dinner" to log expenses.
+* **Auto-Onboarding:** New users simply provide their email to receive a private, cloned ledger template via Google Drive.
+* **Natural Language Queries:** Ask "How much did I spend on groceries this week?" to get instant analytics.
+* **Context-Aware Editing:** Undo last entries or edit specific items via voice commands.
+* **SaaS Architecture:** Built for multiple users with PostgreSQL session management and dynamic AWS deployment.
 
 ### 🧠 Intelligent "CFO Mode"
 * **Intent Classification:** The system analyzes your voice to decide if you are **Reporting** an expense, **Querying** your history, or just chatting (and filters out irrelevant noise like songs).
@@ -22,15 +30,15 @@ Built with **Java Spring Boot**, powered by **Groq (Whisper + Llama 3)**, and ba
 ---
 
 ## 🛠️ Tech Stack
-
-* **Core:** Java 22, Spring Boot 3.2 (Web, RestTemplate, Async)
+* **Backend:** Java 22 / Spring Boot 3.2 (Web, RestTemplate, Async)
 * **AI Engine:** Groq API
-   * **Hearing:** `whisper-large-v3` (Audio to Text)
-   * **Brain:** `llama-3.3-70b` (Intent Analysis & Entity Extraction)
-* **Database:** Google Sheets API v4 (Live Ledger)
+    * **Hearing:** `whisper-large-v3` (Audio to Text)
+    * **Brain:** `llama-3.3-70b` (Intent Analysis & Entity Extraction)
+* **Cloud & DevOps:** AWS EC2, Docker, Nginx, DuckDNS, Certbot (SSL)
+* **Database:** PostgreSQL, Google Sheets API v4 
 * **Messaging:** WhatsApp Business Cloud API
-* **Security:** Meta Webhook Verification, Service Account Auth (Google Cloud)
-
+* **External APIs:** Meta WhatsApp Cloud API, Google Sheets API, Google Drive API
+* * **Security:** Meta Webhook Verification, Service Account Auth (Google Cloud)
 ---
 
 ## ⚙️ Architecture (The "Brain" Flow)
@@ -45,6 +53,11 @@ Built with **Java Spring Boot**, powered by **Groq (Whisper + Llama 3)**, and ba
    * **Read Path:** Fetches sheet data, filters in memory, calculates totals per currency.
 5. **Feedback:** Bot replies to WhatsApp with a confirmation or a formatted financial report.
 
+---
+
+## ⚙️ Deployment
+The application is deployed on an AWS EC2 instance, secured with an Nginx reverse proxy and SSL.
+`Base URL: https://spendtrace.duckdns.org/webhook`
 ---
 
 ## 🏃‍♂️ Quick Start
@@ -137,3 +150,5 @@ Bot: 🔍 CFO Report 💰 Total: 25,000 PKR 📊 Transactions: 4 📅 Period: 20
 | 8. Undo          | Soft Undo            | "Delete last" removes the very last row added.                                   |
 | 9. Noise         | Irrelevant Audio     | Songs/Greetings are ignored with a polite refusal.                               |
 | 10. Resilience   | Network Retry        | (Hard to force, but ensures system doesn't crash on weak WiFi).                  |
+
+*Developed by Maaz Ahmad*
