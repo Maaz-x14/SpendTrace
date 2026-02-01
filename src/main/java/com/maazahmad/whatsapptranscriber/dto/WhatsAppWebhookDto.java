@@ -24,13 +24,20 @@ public class WhatsAppWebhookDto {
 
     @Data
     public static class Message {
+        private String id; // Added for idempotency
         private String type;
-        private Audio audio;
         private String from;
+        private Audio audio;
+        private Text text; // Added this
     }
 
     @Data
     public static class Audio {
         private String id;
+    }
+
+    @Data
+    public static class Text { // Added this nested class
+        private String body;
     }
 }
