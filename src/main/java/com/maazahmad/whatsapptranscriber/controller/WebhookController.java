@@ -3,6 +3,8 @@ package com.maazahmad.whatsapptranscriber.controller;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.maazahmad.whatsapptranscriber.dto.WhatsAppWebhookDto;
+import com.maazahmad.whatsapptranscriber.model.User;
+import com.maazahmad.whatsapptranscriber.repository.UserRepository;
 import com.maazahmad.whatsapptranscriber.service.GoogleSheetsService;
 import com.maazahmad.whatsapptranscriber.service.GroqService;
 import com.maazahmad.whatsapptranscriber.service.WhatsAppService;
@@ -12,6 +14,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -24,6 +27,7 @@ public class WebhookController {
     private final GroqService groqService;
     private final ObjectMapper objectMapper;
     private final GoogleSheetsService googleSheetsService;
+    private final UserRepository userRepository;
 
     // Idempotency cache to prevent duplicate processing
     private final Set<String> processedMessageIds = ConcurrentHashMap.newKeySet();
@@ -92,6 +96,14 @@ public class WebhookController {
 
     @Async
     public void processAudioAsync(String mediaId, String from) {
+        Optional<User> userOpt = userRepository.findByPhoneNumber(from);
+        if (userOpt.isEmpty()) {
+            whatsAppService.sendReply(from, "👋 Welcome to SpendTrace! I don't have a ledger for you yet. Please reply with your *email address* to set one up.");
+            return;
+        }
+
+        String userSheetId = userOpt.get().getSpreadsheetId();
+
         try {
             // Step 1: Download Audio
             System.out.println("Fetching URL for Media ID: " + mediaId);
