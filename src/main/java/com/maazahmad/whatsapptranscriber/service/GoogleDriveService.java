@@ -1,61 +1,53 @@
 package com.maazahmad.whatsapptranscriber.service;
 
-import com.google.api.client.googleapis.javanet.GoogleNetHttpTransport;
-import com.google.api.client.json.gson.GsonFactory;
 import com.google.api.services.drive.Drive;
-import com.google.api.services.drive.DriveScopes;
 import com.google.api.services.drive.model.File;
 import com.google.api.services.drive.model.Permission;
-import com.google.auth.http.HttpCredentialsAdapter;
-import com.google.auth.oauth2.GoogleCredentials;
-import jakarta.annotation.PostConstruct;
+import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 
+import java.io.IOException;
 import java.util.Collections;
 
 @Service
+@RequiredArgsConstructor
 public class GoogleDriveService {
 
-    private Drive driveService;
+    private final Drive driveService;
 
-    @Value("${google.credentials.path}")
-    private String credentialsPath;
-
+    // This was the missing variable!
     @Value("${google.template.sheet.id}")
-    private String templateId;
+    private String templateSheetId;
 
-    @PostConstruct
-    public void init() throws Exception {
-        GoogleCredentials credentials = GoogleCredentials.fromStream(
-                        new ClassPathResource(credentialsPath).getInputStream())
-                .createScoped(Collections.singleton(DriveScopes.DRIVE));
-
-        this.driveService = new Drive.Builder(
-                GoogleNetHttpTransport.newTrustedTransport(),
-                GsonFactory.getDefaultInstance(),
-                new HttpCredentialsAdapter(credentials))
-                .setApplicationName("SpendTrace")
-                .build();
-    }
+    @Value("${google.drive.folder.id}")
+    private String destinationFolderId;
 
     public String cloneSheetForUser(String userEmail, String phoneNumber) throws Exception {
-        // 1. Clone the Template
-        File copiedFile = new File();
-        copiedFile.setName("SpendTrace Ledger: " + phoneNumber);
+        // 1. Setup metadata for the new file
+        File copiedFileMetadata = new File();
+        copiedFileMetadata.setName("SpendTrace Ledger: " + phoneNumber);
+        
+        // Ensure the file is placed in your folder ID from application.properties
+        copiedFileMetadata.setParents(java.util.Collections.singletonList(destinationFolderId));
 
-        File newSheet = driveService.files().copy(templateId, copiedFile).execute();
+        // 2. Execute the copy with 'supportsAllDrives' enabled
+        // This is the key to bypassing some quota restrictions in shared folders
+        File newSheet = driveService.files().copy(templateSheetId, copiedFileMetadata)
+                .setFields("id")
+                .setSupportsAllDrives(true) 
+                .execute();
+        
         String newSheetId = newSheet.getId();
 
-        // 2. Share with User's Email (Writer access)
+        // 3. Grant the user access
         Permission userPermission = new Permission()
                 .setType("user")
                 .setRole("writer")
                 .setEmailAddress(userEmail);
 
         driveService.permissions().create(newSheetId, userPermission)
-                .setTransferOwnership(false)
+                .setSupportsAllDrives(true)
                 .execute();
 
         return newSheetId;

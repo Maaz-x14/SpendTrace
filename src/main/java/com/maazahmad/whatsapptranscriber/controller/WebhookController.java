@@ -51,37 +51,56 @@ public class WebhookController {
         System.out.println("========== NEW WEBHOOK RECEIVED ==========");
 
         try {
-            WhatsAppWebhookDto dto = objectMapper.readValue(rawPayload, WhatsAppWebhookDto.class);
+            // Use JsonNode to bypass strict DTO mapping issues
+            JsonNode payload = objectMapper.readTree(rawPayload);
+            JsonNode entry = payload.path("entry").get(0);
+            JsonNode changes = entry.path("changes").get(0);
+            JsonNode value = changes.path("value");
 
-            if (dto.getEntry() != null && !dto.getEntry().isEmpty()) {
-                WhatsAppWebhookDto.Value value = dto.getEntry().get(0).getChanges().get(0).getValue();
+            // 1. Ignore status updates (read/delivered receipts)
+            if (value.has("statuses")) {
+                System.out.println("DEBUG: Ignoring status update/read receipt.");
+                return ResponseEntity.ok("STATUS_IGNORED");
+            }
 
-                if (value.getMessages() != null && !value.getMessages().isEmpty()) {
-                    WhatsAppWebhookDto.Message message = value.getMessages().get(0);
-                    String from = message.getFrom();
-                    String msgId = message.getId() != null ? message.getId() : "default_id";
+            // 2. Process Messages
+            if (value.has("messages")) {
+                JsonNode message = value.path("messages").get(0);
+                String from = message.path("from").asText();
+                String msgId = message.path("id").asText("default_id");
 
-                    // Idempotency check
-                    if (processedMessageIds.contains(msgId)) {
-                        return ResponseEntity.ok().build();
-                    }
-                    processedMessageIds.add(msgId);
+                // Idempotency check
+                if (processedMessageIds.contains(msgId)) {
+                    return ResponseEntity.ok().build();
+                }
+                processedMessageIds.add(msgId);
 
-                    // AUDIO PROCESSING
-                    if ("audio".equals(message.getType()) && message.getAudio() != null) {
-                        processAudioAsync(message.getAudio().getId(), from);
-                    }
-                    // TEXT ONBOARDING
-                    else if ("text".equals(message.getType()) && message.getText() != null) {
-                        String body = message.getText().getBody();
-                        if (body != null && body.contains("@")) {
-                            processOnboardingAsync(from, body);
-                        }
+                String type = message.path("type").asText();
+
+                // AUDIO PROCESSING
+                if ("audio".equals(type)) {
+                    String mediaId = message.path("audio").path("id").asText();
+                    System.out.println("DEBUG: Audio message detected from " + from);
+                    processAudioAsync(mediaId, from);
+                }
+                // TEXT PROCESSING
+                else if ("text".equals(type)) {
+                    String body = message.path("text").path("body").asText();
+                    System.out.println("DEBUG: Text message received: " + body);
+
+                    if (body != null && body.contains("@")) {
+                        processOnboardingAsync(from, body);
+                    } else {
+                        // THE FIX FOR "HI"
+                        whatsAppService.sendReply(from, "👋 *SpendTrace AI is Active!*\n\n" +
+                                "🎙️ Send a *voice note* to log an expense.\n" +
+                                "📧 Send your *email* to set up your ledger.");
                     }
                 }
             }
         } catch (Exception e) {
-            System.err.println("Error parsing webhook: " + e.getMessage());
+            System.err.println("CRITICAL ERROR in handleWebhook: " + e.getMessage());
+            e.printStackTrace();
         }
 
         return ResponseEntity.ok("EVENT_RECEIVED");

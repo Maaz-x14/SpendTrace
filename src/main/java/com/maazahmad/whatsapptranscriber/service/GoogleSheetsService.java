@@ -14,16 +14,15 @@ import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.SneakyThrows;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 
+import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.security.GeneralSecurityException;
 import java.time.LocalDate;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
@@ -35,36 +34,41 @@ public class GoogleSheetsService {
     @Value("${google.credentials.path}")
     private String credentialsPath;
 
+    // Standardize the tab name here
+    private static final String DEFAULT_SHEET = "Sheet1";
+
     @PostConstruct
     public void init() throws IOException, GeneralSecurityException {
-        GoogleCredentials credentials = GoogleCredentials.fromStream(
-                        new ClassPathResource(credentialsPath).getInputStream())
-                .createScoped(Collections.singleton(SheetsScopes.SPREADSHEETS));
+        try (InputStream in = new FileInputStream(credentialsPath)) {
+            GoogleCredentials credentials = GoogleCredentials.fromStream(in)
+                    .createScoped(Collections.singleton(SheetsScopes.SPREADSHEETS));
 
-        this.sheetsService = new Sheets.Builder(
-                GoogleNetHttpTransport.newTrustedTransport(),
-                GsonFactory.getDefaultInstance(),
-                new HttpCredentialsAdapter(credentials))
-                .setApplicationName("SpendTrace")
-                .build();
+            this.sheetsService = new Sheets.Builder(
+                    GoogleNetHttpTransport.newTrustedTransport(),
+                    GsonFactory.getDefaultInstance(),
+                    new HttpCredentialsAdapter(credentials))
+                    .setApplicationName("SpendTrace")
+                    .build();
+        }
     }
 
     @SneakyThrows
     public void logExpense(String jsonExpense, String spreadsheetId) {
         JsonNode root = objectMapper.readTree(jsonExpense);
 
-        String date = root.path("date").asText("N/A");
-        String item = root.path("item").asText("Unknown");
-        double amount = root.path("amount").asDouble(0.0);
-        String currency = root.path("currency").asText("PKR");
-        String merchant = root.path("merchant").asText("Unknown");
-        String category = root.path("category").asText("Uncategorized");
+        List<Object> rowData = List.of(
+            root.path("date").asText(LocalDate.now().toString()),
+            root.path("item").asText("Unknown"),
+            root.path("amount").asDouble(0.0),
+            root.path("currency").asText("PKR"),
+            root.path("merchant").asText("Unknown"),
+            root.path("category").asText("Uncategorized")
+        );
 
-        List<Object> rowData = List.of(date, item, amount, currency, merchant, category);
         ValueRange body = new ValueRange().setValues(List.of(rowData));
 
         sheetsService.spreadsheets().values()
-                .append(spreadsheetId, "Sheet1!A1", body)
+                .append(spreadsheetId, DEFAULT_SHEET + "!A1", body)
                 .setValueInputOption("USER_ENTERED")
                 .execute();
 
@@ -74,9 +78,65 @@ public class GoogleSheetsService {
     @SneakyThrows
     public List<List<Object>> readAllRows(String spreadsheetId) {
         ValueRange response = sheetsService.spreadsheets().values()
-                .get(spreadsheetId, "Sheet1!A:F")
+                .get(spreadsheetId, DEFAULT_SHEET + "!A:F")
                 .execute();
         return response.getValues();
+    }
+
+    public String calculateAnalytics(String category, String merchant, String item, String startStr, String endStr, String spreadsheetId) {
+        List<List<Object>> rows = readAllRows(spreadsheetId);
+        if (rows == null || rows.isEmpty() || rows.size() < 2) return "⚠️ Your ledger is currently empty.";
+
+        double total = 0.0;
+        int matchCount = 0;
+        String currency = "PKR";
+
+        LocalDate startDate = parseDateSafely(startStr);
+        LocalDate endDate = parseDateSafely(endStr);
+
+        // Skip header (row 0)
+        for (int i = 1; i < rows.size(); i++) {
+            List<Object> row = rows.get(i);
+            if (row.size() < 4) continue;
+
+            try {
+                LocalDate rowDate = LocalDate.parse(row.get(0).toString());
+                String rowItem = row.get(1).toString().toLowerCase();
+                double rowAmount = Double.parseDouble(row.get(2).toString());
+                String rowCurrency = row.get(3).toString();
+                String rowMerchant = row.size() > 4 ? row.get(4).toString().toLowerCase() : "";
+                String rowCategory = row.size() > 5 ? row.get(5).toString().toLowerCase() : "";
+
+                // Date Filter
+                if (startDate != null && rowDate.isBefore(startDate)) continue;
+                if (endDate != null && rowDate.isAfter(endDate)) continue;
+
+                // Content Filters (Case-Insensitive)
+                if (isFilterActive(category) && !rowCategory.contains(category.toLowerCase())) continue;
+                if (isFilterActive(merchant) && !rowMerchant.contains(merchant.toLowerCase())) continue;
+                if (isFilterActive(item) && !rowItem.contains(item.toLowerCase())) continue;
+
+                total += rowAmount;
+                currency = rowCurrency;
+                matchCount++;
+            } catch (Exception e) {
+                // Skip rows with bad formatting
+            }
+        }
+
+        if (matchCount == 0) return "🔍 No records match your current filters.";
+
+        return String.format("📊 *Spending Report*\n━━━━━━━━━━━━━━\nTotal: *%.2f %s*\nTransactions: %d", 
+                total, currency, matchCount);
+    }
+
+    private LocalDate parseDateSafely(String dateStr) {
+        if (dateStr == null || dateStr.isEmpty() || "null".equalsIgnoreCase(dateStr)) return null;
+        try { return LocalDate.parse(dateStr); } catch (Exception e) { return null; }
+    }
+
+    private boolean isFilterActive(String filter) {
+        return filter != null && !filter.isEmpty() && !"null".equalsIgnoreCase(filter);
     }
 
     @SneakyThrows
@@ -101,21 +161,20 @@ public class GoogleSheetsService {
 
                 if (itemMatch && dateMatch) {
                     int rowIndex = i + 1;
-                    String range = "Sheet1!C" + rowIndex + ":D" + rowIndex;
+                    String range = DEFAULT_SHEET + "!C" + rowIndex + ":D" + rowIndex;
 
-                    List<Object> updateData = List.of(newAmount, newCurrency);
-                    ValueRange body = new ValueRange().setValues(List.of(updateData));
+                    ValueRange body = new ValueRange().setValues(List.of(List.of(newAmount, newCurrency)));
 
                     sheetsService.spreadsheets().values()
                             .update(spreadsheetId, range, body)
                             .setValueInputOption("USER_ENTERED")
                             .execute();
 
-                    return String.format("✅ Updated **%s** (%s) to **%.2f %s**.", targetItem, row.get(0), newAmount, newCurrency);
+                    return String.format("✅ Updated **%s** to **%.2f %s**.", targetItem, newAmount, newCurrency);
                 }
             } catch (Exception e) {}
         }
-        return "❌ Not found.";
+        return "❌ Expense not found.";
     }
 
     @SneakyThrows
@@ -124,29 +183,12 @@ public class GoogleSheetsService {
         if (rows == null || rows.isEmpty()) return "⚠️ Nothing to undo.";
 
         int lastRowIndex = rows.size();
-        String range = "Sheet1!A" + lastRowIndex + ":F" + lastRowIndex;
+        String range = DEFAULT_SHEET + "!A" + lastRowIndex + ":F" + lastRowIndex;
 
         sheetsService.spreadsheets().values()
                 .clear(spreadsheetId, range, new ClearValuesRequest())
                 .execute();
 
         return "✅ Last entry deleted.";
-    }
-
-    public String calculateAnalytics(String category, String merchant, String item, String startStr, String endStr, String spreadsheetId) {
-        List<List<Object>> rows = readAllRows(spreadsheetId);
-        if (rows == null || rows.isEmpty()) return "No data found.";
-
-        Map<String, Double> totals = new HashMap<>();
-        int count = 0;
-
-        for (List<Object> row : rows) {
-            try {
-                if (row.size() < 6) continue;
-                // ... (Analytics logic remains the same, but uses the 'rows' fetched via dynamic ID)
-                count++;
-            } catch (Exception e) {}
-        }
-        return "📊 Summary generated for " + count + " items.";
     }
 }

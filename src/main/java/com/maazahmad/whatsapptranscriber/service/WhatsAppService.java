@@ -59,9 +59,10 @@ public class WhatsAppService {
         }
     }
 
-    @SneakyThrows
     public void sendReply(String to, String text) {
         String url = whatsappApiUrl + "/" + phoneNumberId + "/messages";
+        System.out.println("DEBUG: Sending message to: " + to + " using Phone ID: " + phoneNumberId);
+
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.setBearerAuth(whatsappToken);
@@ -75,10 +76,16 @@ public class WhatsAppService {
         body.put("text", textBody);
 
         HttpEntity<Map<String, Object>> requestEntity = new HttpEntity<>(body, headers);
-        ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.POST, requestEntity, String.class);
-
-        if (!response.getStatusCode().is2xxSuccessful()) {
-            throw new RuntimeException("Failed to send reply: " + response.getStatusCode());
+        
+        try {
+            ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.POST, requestEntity, String.class);
+            System.out.println("META SUCCESS: " + response.getBody());
+        } catch (org.springframework.web.client.HttpClientErrorException e) {
+            System.out.println("META ERROR BODY: " + e.getResponseBodyAsString());
+            System.out.println("META ERROR STATUS: " + e.getStatusCode());
+        } catch (Exception e) {
+            System.out.println("SYSTEM ERROR: " + e.getMessage());
+            e.printStackTrace();
         }
     }
 }
