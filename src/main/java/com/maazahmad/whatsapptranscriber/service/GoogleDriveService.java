@@ -14,47 +14,53 @@ import java.util.Collections;
 public class GoogleDriveService {
 
     private final Drive driveService;
-
-    @Value("${google.template.sheet.id}")
-    private String templateSheetId;
+    private final GoogleSheetsService googleSheetsService;
 
     @Value("${google.drive.folder.id}")
     private String destinationFolderId;
 
-    // Add this to your existing fields
-    private final GoogleSheetsService googleSheetsService;
-
     public String cloneSheetForUser(String userEmail, String phoneNumber) throws Exception {
-        System.out.println("DEBUG: Creating Ledger via Sheets API for " + phoneNumber);
+        System.out.println("DEBUG: Provisioning UNIQUE ledger for " + phoneNumber);
 
-        // 1. Create the file using SHEETS API (Bypasses Drive quota)
-        String newSheetId = googleSheetsService.createSpreadsheet("SpendTrace Ledger: " + phoneNumber);
+        // 1. Metadata for a fresh, uniquely named Spreadsheet
+        File fileMetadata = new File();
+        fileMetadata.setName("SpendTrace Ledger: " + phoneNumber);
+        fileMetadata.setMimeType("application/vnd.google-apps.spreadsheet");
+        fileMetadata.setParents(Collections.singletonList(destinationFolderId));
 
-        // 2. MOVE the file to the destination folder
+        String newSheetId;
         try {
-            System.out.println("DEBUG: Moving file to folder: " + destinationFolderId);
-            driveService.files().update(newSheetId, null)
-                    .setAddParents(destinationFolderId)
+            // Creating a fresh file and ignoring default visibility to bypass 0GB quota
+            File newSheet = driveService.files().create(fileMetadata)
+                    .setFields("id")
                     .setSupportsAllDrives(true)
+                    .setIgnoreDefaultVisibility(true) 
                     .execute();
-            System.out.println("DEBUG: Move SUCCESS.");
+            
+            newSheetId = newSheet.getId();
+            System.out.println("DEBUG: Creation SUCCESS. ID: " + newSheetId);
+
         } catch (Exception e) {
-            System.err.println("DEBUG: Move FAILED: " + e.getMessage());
-            // We continue anyway because the file exists, it's just in the bot's root
+            System.err.println("DEBUG: FAILED at Step 1 (Create): " + e.getMessage());
+            throw e;
         }
 
-        // 3. Transfer Ownership
-        Permission userPermission = new Permission()
-                .setType("user")
-                .setRole("owner")
-                .setEmailAddress(userEmail);
+        // 2. Add the User as a Writer
+        try {
+            Permission userPermission = new Permission()
+                    .setType("user")
+                    .setRole("writer") 
+                    .setEmailAddress(userEmail);
 
-        driveService.permissions().create(newSheetId, userPermission)
-                .setSupportsAllDrives(true)
-                .setTransferOwnership(true)
-                .execute();
-        
-        // 4. Initialize Headers
+            driveService.permissions().create(newSheetId, userPermission)
+                    .setSupportsAllDrives(true)
+                    .execute();
+            System.out.println("DEBUG: Permission granted to " + userEmail);
+        } catch (Exception e) {
+            System.err.println("DEBUG: FAILED at Step 2 (Permission): " + e.getMessage());
+        }
+
+        // 3. Initialize the clean headers
         googleSheetsService.setupHeaders(newSheetId);
 
         return newSheetId;
