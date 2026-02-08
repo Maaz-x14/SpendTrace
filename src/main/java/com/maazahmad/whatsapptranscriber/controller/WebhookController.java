@@ -2,7 +2,6 @@ package com.maazahmad.whatsapptranscriber.controller;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.maazahmad.whatsapptranscriber.dto.WhatsAppWebhookDto;
 import com.maazahmad.whatsapptranscriber.model.User;
 import com.maazahmad.whatsapptranscriber.repository.UserRepository;
 import com.maazahmad.whatsapptranscriber.service.*;
@@ -51,64 +50,67 @@ public class WebhookController {
         System.out.println("========== NEW WEBHOOK RECEIVED ==========");
 
         try {
-            // Use JsonNode to bypass strict DTO mapping issues
             JsonNode payload = objectMapper.readTree(rawPayload);
             JsonNode entry = payload.path("entry").get(0);
             JsonNode changes = entry.path("changes").get(0);
             JsonNode value = changes.path("value");
 
-            // 1. Ignore status updates (read/delivered receipts)
             if (value.has("statuses")) {
                 System.out.println("DEBUG: Ignoring status update/read receipt.");
                 return ResponseEntity.ok("STATUS_IGNORED");
             }
 
-            // 2. Process Messages
             if (value.has("messages")) {
                 JsonNode message = value.path("messages").get(0);
                 String from = message.path("from").asText();
                 String msgId = message.path("id").asText("default_id");
 
-                // Idempotency check
                 if (processedMessageIds.contains(msgId)) {
                     return ResponseEntity.ok().build();
                 }
                 processedMessageIds.add(msgId);
 
                 String type = message.path("type").asText();
+                Optional<User> userOpt = userRepository.findByPhoneNumber(from);
 
                 // AUDIO PROCESSING
                 if ("audio".equals(type)) {
                     String mediaId = message.path("audio").path("id").asText();
                     System.out.println("DEBUG: Audio message detected from " + from);
-                    processAudioAsync(mediaId, from);
-                }
+                    processAudioAsync(mediaId, from, userOpt);
+                } 
                 // TEXT PROCESSING
                 else if ("text".equals(type)) {
                     String body = message.path("text").path("body").asText();
                     System.out.println("DEBUG: Text message received: " + body);
 
                     if (body != null && body.contains("@")) {
-                        processOnboardingAsync(from, body);
+                        processOnboardingAsync(from, body, userOpt);
+                    } else if (body != null && (body.equalsIgnoreCase("hi") || body.equalsIgnoreCase("hello"))) {
+                        // SMART GREETING
+                        if (userOpt.isPresent()) {
+                            whatsAppService.sendReply(from, "Welcome back! 💸\n\n" +
+                                    "Ready to log something? Just send a *voice note*.\n" +
+                                    "Your ledger: https://docs.google.com/spreadsheets/d/" + userOpt.get().getSpreadsheetId());
+                        } else {
+                            whatsAppService.sendReply(from, "👋 *SpendTrace AI is Active!*\n\n" +
+                                    "🎙️ Send a *voice note* to log an expense.\n" +
+                                    "📧 Send your *email* to set up your ledger.");
+                        }
                     } else {
-                        // THE FIX FOR "HI"
-                        whatsAppService.sendReply(from, "👋 *SpendTrace AI is Active!*\n\n" +
-                                "🎙️ Send a *voice note* to log an expense.\n" +
-                                "📧 Send your *email* to set up your ledger.");
+                        whatsAppService.sendReply(from, "I'm ready! Send a voice note to log an expense or your email to set up your ledger.");
                     }
                 }
             }
         } catch (Exception e) {
             System.err.println("CRITICAL ERROR in handleWebhook: " + e.getMessage());
-            e.printStackTrace();
         }
 
         return ResponseEntity.ok("EVENT_RECEIVED");
     }
 
     @Async
-    public void processAudioAsync(String mediaId, String from) {
-        Optional<User> userOpt = userRepository.findByPhoneNumber(from);
+    public void processAudioAsync(String mediaId, String from, Optional<User> userOpt) {
         if (userOpt.isEmpty()) {
             whatsAppService.sendReply(from, "👋 Welcome! I don't have a ledger for you yet. Please reply with your *email address* to set one up.");
             return;
@@ -150,12 +152,19 @@ public class WebhookController {
             whatsAppService.sendReply(from, replyMessage);
 
         } catch (Exception e) {
-            whatsAppService.sendReply(from, "❌ Error: " + e.getMessage());
+            whatsAppService.sendReply(from, "❌ Error processing audio: " + e.getMessage());
         }
     }
 
     @Async
-    public void processOnboardingAsync(String from, String email) {
+    public void processOnboardingAsync(String from, String email, Optional<User> userOpt) {
+        // DUPLICATE CHECK
+        if (userOpt.isPresent()) {
+            whatsAppService.sendReply(from, "You're already all set! ✅\n\n" +
+                    "Your ledger is here: https://docs.google.com/spreadsheets/d/" + userOpt.get().getSpreadsheetId());
+            return;
+        }
+
         try {
             whatsAppService.sendReply(from, "⚙️ Provisioning your private ledger...");
             String newSheetId = googleDriveService.cloneSheetForUser(email, from);
