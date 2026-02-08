@@ -52,6 +52,33 @@ public class GoogleSheetsService {
         }
     }
 
+    public void setupHeaders(String spreadsheetId) {
+        try {
+            List<Object> headers = List.of("Date", "Item", "Amount", "Currency", "Merchant", "Category");
+            ValueRange body = new ValueRange().setValues(List.of(headers));
+            sheetsService.spreadsheets().values()
+                    .update(spreadsheetId, "Sheet1!A1", body)
+                    .setValueInputOption("USER_ENTERED")
+                    .execute();
+        } catch (Exception e) {
+            System.err.println("Failed to set headers: " + e.getMessage());
+        }
+    }
+
+    @SneakyThrows
+    public String createSpreadsheet(String title) {
+        com.google.api.services.sheets.v4.model.Spreadsheet spreadsheet = new com.google.api.services.sheets.v4.model.Spreadsheet()
+                .setProperties(new com.google.api.services.sheets.v4.model.SpreadsheetProperties().setTitle(title));
+        
+        com.google.api.services.sheets.v4.model.Spreadsheet result = sheetsService.spreadsheets().create(spreadsheet)
+                .setFields("spreadsheetId")
+                .execute();
+        
+        String id = result.getSpreadsheetId();
+        System.out.println("DEBUG: Sheets API Creation SUCCESS. ID: " + id);
+        return id;
+    }
+  
     @SneakyThrows
     public void logExpense(String jsonExpense, String spreadsheetId) {
         JsonNode root = objectMapper.readTree(jsonExpense);
