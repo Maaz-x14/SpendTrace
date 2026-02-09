@@ -9,10 +9,14 @@ Built with **Java Spring Boot**, powered by **Groq (Whisper + Llama 3)**, and ba
 
 ## 🚀 Features
 * **Voice-to-Ledger:** Send voice notes like "Spent 500 on dinner" to log expenses.
-* **Auto-Onboarding:** New users simply provide their email to receive a private, cloned ledger template via Google Drive.
+* **Smart Onboarding & Duplicate Prevention:** New users simply provide their email to receive a private, cloned ledger template via Google Drive. Detects existing users to prevent redundant ledger creation.0
 * **Natural Language Queries:** Ask "How much did I spend on groceries this week?" to get instant analytics.
 * **Context-Aware Editing:** Undo last entries or edit specific items via voice commands.
 * **SaaS Architecture:** Built for multiple users with PostgreSQL session management and dynamic AWS deployment.
+* **Automated Analytics Dashboard:** Every user ledger now includes a live "Analytics" tab with injected =QUERY formulas for real-time category spending.
+* **Proactive Weekly Reports:** Sends a "CFO Wrap-up" every Sunday at 9:00 PM (PKT) with a summary of the entire week expenses.
+* **Manual Refresh Command:** Users can send "REFRESH" to fix headers or re-inject the Analytics tab into their existing sheets.
+
 
 ### 🧠 Intelligent "CFO Mode"
 * **Intent Classification:** The system analyzes your voice to decide if you are **Reporting** an expense, **Querying** your history, or just chatting (and filters out irrelevant noise like songs).
@@ -26,6 +30,9 @@ Built with **Java Spring Boot**, powered by **Groq (Whisper + Llama 3)**, and ba
 * **Granular Analytics:** Queries allow filtering by **Category** (Food), **Merchant** (KFC), **Item** (Wings), and **Date Range**.
 * **Resilience:** Implements retry logic for AI services and idempotency checks to handle Meta's duplicate webhook events.
 * **Zero-Entry Interface:** No forms or buttons. Just talk.
+* **Timezone-Aware Scheduling:** Cron jobs are synced to Asia/Karachi to ensure localized report delivery.
+* **Global Exception Shield:** Implemented @ControllerAdvice to catch AI fumbles and provide user-friendly "Gen Z" feedback instead of raw stack traces.
+* **Zero-Quota Provisioning:** Uses direct file creation with ignoreDefaultVisibility to bypass Service Account storage limits.
 
 ---
 
@@ -49,7 +56,8 @@ Built with **Java Spring Boot**, powered by **Groq (Whisper + Llama 3)**, and ba
    * *Is this a new expense?* → Extract specific JSON fields.
    * *Is this a question?* → Extract filter parameters (Dates, Categories).
 4. **Execution (The Router):**
-   * **Write Path:** Appends a structured row to the Google Sheet.
+   * **Write Path:** Appends structured data AND manages sheet metadata (Headers/Analytics).
+   * **Automated Path:** Spring Boot Cron Scheduler triggers weekly readAllRows operations for proactive reporting.
    * **Read Path:** Fetches sheet data, filters in memory, calculates totals per currency.
 5. **Feedback:** Bot replies to WhatsApp with a confirmation or a formatted financial report.
 
@@ -92,6 +100,10 @@ groq.api.url=[https://api.groq.com/openai/v1/audio/transcriptions](https://api.g
 # Google Sheets Config
 google.sheets.id=YOUR_SPREADSHEET_ID
 google.credentials.path=google-sheets-key.json
+
+# Google Drive Config
+google.drive.folder.id=YOUR_DESTINATION_FOLDER_ID
+google.template.sheet.id=YOUR_MASTER_TEMPLATE_ID
 ```
 
 ### 3. Google Sheets Auth
@@ -129,10 +141,18 @@ Bot: ✅ Expense Saved! 🛒 Mechanical Keyboard | 💰 150 USD | 📅 [Calculat
 
 Bot: 🔍 CFO Report 💰 Total: 25,000 PKR 📊 Transactions: 4 📅 Period: 2026-01-01 to 2026-01-30
 
+#### 4. Refresh & Maintenance
+
+🎤 "REFRESH" Bot: ✅ Analytics Refresh: Headers and Analytics tab have been injected into your ledger!
+
+#### 5. Bot (Sunday 9 PM): 
+
+📈 Your Weekly CFO Wrap-up 📊 Spending Report | Total: 4030.00 PKR | Transactions: 3
+
 ### 🔮 Future Roadmap
 **Visual Charts:** Generate image charts using Python/QuickChart and send back to WhatsApp.
 
-**Budget Alerts:** "Warning: You have exceeded your Food budget."
+**Budget Alerts:** Set specific PKR limits per category and receive "Over-budget" alerts.
 
 **Receipt Scanning:** Process image messages using Llama-3 Vision.
 
